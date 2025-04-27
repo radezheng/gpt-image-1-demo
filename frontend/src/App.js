@@ -144,21 +144,32 @@ function App() {
     setUsageInfo(null);
     setGenerationTime(null);
     
+    // 输出调试信息
+    console.log("提交状态:", { 
+      uploadedImagesLength: uploadedImages.length,
+      selectedImageIndex,
+      hasPrompt: !!prompt
+    });
+    
     const startTime = new Date();
     try {
       let data;
       if (uploadedImages.length > 1) {
         // 多张图片批量编辑，先转 Base64 数组
+        console.log("使用批量编辑API，上传 " + uploadedImages.length + " 张照片");
         const base64Arr = await Promise.all(
           uploadedImages.map(img => img.file ? toBase64(img.file) : toBase64Url(img.src))
         );
         data = await callBulkImageEditAPI({ images: base64Arr, prompt, model, size, n, quality });
-      } else if (uploadedImages.length === 1 && selectedImageIndex !== null) {
-        // 单张图片编辑
-        const sel = uploadedImages[selectedImageIndex];
+      } else if (uploadedImages.length === 1) {
+        // 只有一张图片，使用编辑API
+        console.log("使用单张图片编辑API");
+        const sel = uploadedImages[0];
         const base64 = sel.file ? await toBase64(sel.file) : await toBase64Url(sel.src);
         data = await callImageEditAPI({ imageBase64: base64, prompt, model, size, n, quality });
       } else {
+        // 无图片，使用生成API
+        console.log("使用图片生成API");
         data = await callImageAPI({ prompt, model, size, n, quality });
       }
       // 计算生成用时
@@ -172,6 +183,7 @@ function App() {
       setUsageInfo(data.usage);
     } catch (err) {
       // 如果后端返回了详细错误信息，则显示message和details
+      console.error("API调用错误:", err);
       const msg = err.message || 'Error';
       const details = err.details ? JSON.stringify(err.details) : null;
       setError(details ? `${msg}: ${details}` : msg);
@@ -278,11 +290,23 @@ function App() {
               <input hidden accept="image/*" multiple type="file" onChange={e => {
                 const files = Array.from(e.target.files);
                 if (!files.length) return;
+                
+                // 清除之前的生成结果，以便正确触发edit接口
+                setUrls([]);
+                
+                // 使用函数式更新来确保我们能访问到最新的状态
                 setUploadedImages(prev => {
                   const imgs = [...prev, ...files.map(file => ({ src: URL.createObjectURL(file), file }))].slice(0, 4);
+                  
+                  // 在这个回调内部可以访问到更新后的uploadedImages（即imgs）
+                  // 在同一个批次中更新selectedImageIndex
+                  setTimeout(() => {
+                    setSelectedImageIndex(imgs.length - 1);
+                    console.log("照片上传完成，设置selectedImageIndex为:", imgs.length - 1);
+                  }, 0);
+                  
                   return imgs;
                 });
-                if (selectedImageIndex === null) setSelectedImageIndex(0);
               }} />
             </Button>
           </Box>
@@ -351,7 +375,7 @@ function App() {
                     style={{ width: '100%', height: 'auto', borderRadius: 4 }}
                   />
                 </Box>
-                <Box sx={{ flexShrink: 0 }}>
+                <Box sx={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                   <Button
                     variant="outlined"
                     size="small"
@@ -374,7 +398,6 @@ function App() {
                       link.click();
                       document.body.removeChild(link);
                     }}
-                    sx={{ ml: 1 }}
                   >
                     Down
                   </Button>

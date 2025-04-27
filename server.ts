@@ -2,11 +2,16 @@ import express, { Request, Response, RequestHandler, NextFunction } from 'expres
 import cors from 'cors';
 import path from 'path';
 import dotenv from 'dotenv';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import fs from 'fs-extra';
 import FormData from 'form-data';
 const multer = require('multer');
 const upload = multer();
+
+// 扩展 AxiosError 类型，添加 details 属性
+interface ExtendedAxiosError extends AxiosError {
+  details?: any;
+}
 
 dotenv.config();
 
@@ -30,37 +35,69 @@ if (!AZ_ENDPOINT || !AZ_KEY) {
 async function generateImages(prompt: string, model: string, size: string, n: number, quality: string) {
   const url = `${AZ_ENDPOINT}/openai/deployments/${model}/images/generations?api-version=2025-03-01-preview`;
   const headers = { 'Content-Type': 'application/json', 'api-key': AZ_KEY };
-  const resp = await axios.post(url, { prompt, model, size, n, quality }, { headers, timeout: 200000 });
-  const data = resp.data;
-  await fs.ensureDir(path.join(process.cwd(), 'img'));
-  const urls: string[] = [];
-  const ts = Date.now();
-  await Promise.all(data.data.map(async (item: any, idx: number) => {
-    let buffer: Buffer;
-    if (item.url) {
-      const r = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
-      buffer = Buffer.from(r.data);
+  try {
+    const resp = await axios.post(url, { prompt, model, size, n, quality }, { headers, timeout: 200000 });
+    const data = resp.data;
+    await fs.ensureDir(path.join(process.cwd(), 'img'));
+    const urls: string[] = [];
+    const ts = Date.now();
+    await Promise.all(data.data.map(async (item: any, idx: number) => {
+      let buffer: Buffer;
+      if (item.url) {
+        const r = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
+        buffer = Buffer.from(r.data);
+      } else {
+        buffer = Buffer.from(item.b64_json, 'base64');
+      }
+      const fname = `image_${ts}_${idx}.png`;
+      const fpath = path.join(process.cwd(), 'img', fname);
+      await fs.writeFile(fpath, buffer);
+      urls.push(`/img/${fname}`);
+    }));
+    // 返回数组对象，包含 url 字段，供前端 data.data.map 使用
+    return { data: urls.map(url => ({ url })), usage: data.usage };
+  } catch (err: any) {
+    // 在函数内部捕获错误，但将其向上传播，保留完整的错误信息
+    console.error('Generate API错误详情:');
+    if (axios.isAxiosError(err) && err.response) {
+      console.error('状态码:', err.response.status);
+      console.error('响应头:', err.response.headers);
+      console.error('响应体:', JSON.stringify(err.response.data, null, 2));
+      // 保留原始错误，但增加响应数据信息
+      (err as ExtendedAxiosError).details = err.response.data;
     } else {
-      buffer = Buffer.from(item.b64_json, 'base64');
+      console.error('非HTTP错误:', err);
     }
-    const fname = `image_${ts}_${idx}.png`;
-    const fpath = path.join(process.cwd(), 'img', fname);
-    await fs.writeFile(fpath, buffer);
-    urls.push(`/img/${fname}`);
-  }));
-  // 返回数组对象，包含 url 字段，供前端 data.data.map 使用
-  return { data: urls.map(url => ({ url })), usage: data.usage };
+    throw err; // 重新抛出错误以便外层处理
+  }
 }
 
 // 生成图片处理
 const generateHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { prompt, model, size, n, quality } = req.body;
+    
+    // 添加日志，记录请求参数
+    console.log(`[Generate API] 收到请求，prompt: ${prompt?.substring(0, 50)}${prompt?.length > 50 ? '...' : ''}, model: ${model}, size: ${size}, n: ${n}, quality: ${quality}`);
+    
     const result = await generateImages(prompt, model, size, Number(n), quality);
     res.json(result);
   } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error('生成接口错误:', err.message);
+    
+    // 如果有详细的响应数据，传递给前端
+    if (err.details) {
+      // 使用适当的HTTP状态码
+      const statusCode = err.response?.status || 500;
+      console.error(`完整错误详情: ${JSON.stringify(err.details, null, 2)}`);
+      res.status(statusCode).json({ 
+        error: err.message, 
+        details: err.details 
+      });
+    } else {
+      // 没有详细数据时的默认处理
+      res.status(500).json({ error: err.message });
+    }
   }
 };
 app.post('/api/generate', generateHandler);
@@ -71,6 +108,10 @@ app.post('/api/edit', upload.any(), async (req: Request, res: Response) => {
     // multer 解析后的文件列表
     const files = (req as any).files as any[];
     const { prompt, model, size, n, quality } = req.body;
+
+    // 添加日志显示提交的照片数量
+    console.log(`[Edit API] 收到 ${files?.length || 0} 张照片, prompt: ${prompt?.substring(0, 50)}${prompt?.length > 50 ? '...' : ''}`);
+    
     if (!files || files.length === 0) {
       res.status(400).json({ error: 'No images provided' });
       return;
@@ -111,6 +152,8 @@ app.post('/api/edit', upload.any(), async (req: Request, res: Response) => {
     if (axios.isAxiosError(err) && err.response) {
       console.error('Edit API error status:', err.response.status);
       console.error('Edit API error response body:', err.response.data);
+      // 使用类型断言确保类型安全
+      (err as ExtendedAxiosError).details = err.response.data;
       res.status(err.response.status).json({ error: err.message, details: err.response.data });
       return;
     }
