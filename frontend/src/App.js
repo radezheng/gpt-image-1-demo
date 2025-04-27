@@ -18,6 +18,7 @@ function App() {
   const [uploadedImages, setUploadedImages] = useState([]);
   const [selectedImageIndex, setSelectedImageIndex] = useState(null);
   const [usageInfo, setUsageInfo] = useState(null);
+  const [generationTime, setGenerationTime] = useState(null);
 
   const toBase64 = file => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -141,6 +142,9 @@ function App() {
     setError(null);
     setUrls([]);
     setUsageInfo(null);
+    setGenerationTime(null);
+    
+    const startTime = new Date();
     try {
       let data;
       if (uploadedImages.length > 1) {
@@ -157,6 +161,11 @@ function App() {
       } else {
         data = await callImageAPI({ prompt, model, size, n, quality });
       }
+      // 计算生成用时
+      const endTime = new Date();
+      const timeTaken = (endTime - startTime) / 1000; // 转换为秒
+      setGenerationTime(timeTaken);
+      
       // 从响应中提取图片 URL 或 Base64
       const arr = data.data.map(item => item.url || `data:image/png;base64,${item.b64_json}`);
       setUrls(arr);
@@ -321,6 +330,9 @@ function App() {
           )}
           {usageInfo && (
             <Box mt={1}>
+              {generationTime && (
+                <Typography variant="body2" sx={{ mb: 1 }}>生成用时: {generationTime.toFixed(2)}秒</Typography>
+              )}
               <Typography variant="body2">使用Tokens: {usageInfo.total_tokens} (输入 {usageInfo.input_tokens}, 输出 {usageInfo.output_tokens})</Typography>
             </Box>
           )}
