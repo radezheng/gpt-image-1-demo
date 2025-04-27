@@ -48,7 +48,7 @@ npm run build
 ```bash
 npm start
 ```  
-服务启动后访问 http://localhost:5009 即可。
+服务启动后访问 http://localhost:5005 即可。
 
 ## 脚本说明
 
