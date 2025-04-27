@@ -1,0 +1,7 @@
+img/*
+.env
+/dist
+/node_modules
+/.DS_Store
+/resp
+/frontend/resp

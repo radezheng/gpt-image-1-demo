@@ -1,0 +1,70 @@
+
+https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/dall-e?tabs=gpt-image-1
+
+{
+    "prompt": "白色的小猫在草地跳舞，草地上有五颜六色的花朵",
+    "model": "gpt-image-1",
+    "size": "1024x1024",  //Specify the size of the generated images. Must be one of 1024x1024, 1024x1536, or 1536x1024 for GPT-image-1 models. Square images are faster to generate.
+    "n": 1,  //You can generate between one and 10 images in a single API call. The default value is 1.
+    "quality": "high"  //There are three options for image quality: low, medium, and high.Lower quality images can be generated faster.
+}
+
+
+###
+POST https://aisvc-wu3.openai.azure.com/openai/deployments/gpt-image-1/images/generations?api-version=2025-03-01-preview
+Content-Type: application/json
+api-key:  {{$dotenv AZURE_OPENAI_KEY}}
+
+{
+    "prompt": "白色的小猫在草地跳舞",
+    "model": "gpt-image-1",
+    "size": "1024x1024",  
+    "n": 1, 
+    "quality": "high" 
+}
+
+###
+POST https://aisvc-wu3.openai.azure.com/openai/deployments/gpt-image-1/images/edit?api-version=2025-03-01-preview
+Content-Type: application/json
+api-key:  {{$dotenv AZURE_OPENAI_KEY}}
+
+{
+    "image": "<base64_encoded_image>",
+    "prompt": "白色的小猫在草地跳舞",
+    "model": "gpt-image-1",
+    "size": "1024x1024",  
+    "n": 1, 
+    "quality": "high" 
+}
+
+###
+// Response 1
+{ 
+    "created": 1698116662, 
+    "data": [ 
+        { 
+            "url": "<URL_to_generated_image>",
+            "revised_prompt": "<prompt_that_was_used>" 
+        }
+    ]
+}
+
+// Response 2
+
+{
+  "created": 1745651953,
+  "data": [
+    {
+      "b64_json": "iVBORw0KG..."
+    }
+  ],
+  "usage": {
+    "input_tokens": 16,
+    "input_tokens_details": {
+      "image_tokens": 0,
+      "text_tokens": 16
+    },
+    "output_tokens": 4160,
+    "total_tokens": 4176
+  }
+}
