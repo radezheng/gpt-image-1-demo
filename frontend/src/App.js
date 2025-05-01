@@ -19,6 +19,8 @@ function App() {
   const [selectedImageIndex, setSelectedImageIndex] = useState(null);
   const [usageInfo, setUsageInfo] = useState(null);
   const [generationTime, setGenerationTime] = useState(null);
+  const [maskImages, setMaskImages] = useState([]);
+  const [selectedMaskIndex, setSelectedMaskIndex] = useState(null);
 
   const toBase64 = file => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -27,7 +29,6 @@ function App() {
     reader.onerror = error => reject(error);
   });
 
-  // convert image URL to base64
   const toBase64Url = url => fetch(url)
     .then(res => res.blob())
     .then(blob => new Promise((resolve, reject) => {
@@ -48,9 +49,10 @@ function App() {
     setUploadedImages([]);
     setSelectedImageIndex(null);
     setUsageInfo(null);
+    setMaskImages([]);
+    setSelectedMaskIndex(null);
   };
 
-  // 调用后端生成 API
   const callImageAPI = async ({prompt, model, size, n, quality}) => {
     const resp = await fetch('/api/generate', {
       method: 'POST',
@@ -60,19 +62,20 @@ function App() {
     if (!resp.ok) {
       const errorBody = await resp.json();
       const errorObj = new Error(errorBody.error || 'Error generating image');
-      // 附加 details
       errorObj.details = errorBody.details;
       throw errorObj;
     }
     return resp.json();
   };
 
-  // 调用后端编辑 API
-  const callImageEditAPI = async ({imageBase64, prompt, model, size, n, quality}) => {
-    // 将 Base64 转换为 Blob
+  const callImageEditAPI = async ({imageBase64, maskBase64, prompt, model, size, n, quality}) => {
     const blob = base64toBlob(imageBase64);
     const form = new FormData();
-    form.append('image[]', blob, 'image.png');  // 使用 'image[]' 与后端匹配
+    form.append('image[]', blob, 'image.png');
+    if (maskBase64) {
+      const maskBlob = base64toBlob(maskBase64);
+      form.append('mask', maskBlob, 'mask.png');
+    }
     form.append('prompt', prompt);
     form.append('model', model);
     form.append('size', size);
@@ -86,14 +89,12 @@ function App() {
     if (!resp.ok) {
       const errorBody = await resp.json();
       const errorObj = new Error(errorBody.error || 'Error editing image');
-      // 附加 details
       errorObj.details = errorBody.details;
       throw errorObj;
     }
     return resp.json();
   };
 
-  // 将 Base64 字符串转换为 Blob
   const base64toBlob = (b64Data) => {
     const byteCharacters = atob(b64Data);
     const byteArrays = [];
@@ -109,10 +110,8 @@ function App() {
     return new Blob(byteArrays, { type: 'image/png' });
   };
 
-  // 批量编辑 API 调用，使用 FormData 多文件上传
-  const callBulkImageEditAPI = async ({ images, prompt, model, size, n, quality }) => {
+  const callBulkImageEditAPI = async ({ images, maskBase64, prompt, model, size, n, quality }) => {
     const form = new FormData();
-    // 添加多张图片 (File 对象或 Base64 字符串转 Blob)
     images.forEach((img, idx) => {
       if (img.file) {
         form.append('image[]', img.file, img.file.name);
@@ -121,6 +120,10 @@ function App() {
         form.append('image[]', blob, `image_${idx}.png`);
       }
     });
+    if (maskBase64) {
+      const maskBlob = base64toBlob(maskBase64);
+      form.append('mask', maskBlob, 'mask.png');
+    }
     form.append('prompt', prompt);
     form.append('model', model);
     form.append('size', size);
@@ -144,45 +147,43 @@ function App() {
     setUsageInfo(null);
     setGenerationTime(null);
     
-    // 输出调试信息
     console.log("提交状态:", { 
       uploadedImagesLength: uploadedImages.length,
       selectedImageIndex,
       hasPrompt: !!prompt
     });
     
+    let maskBase64 = null;
+    if (maskImages.length > 0) {
+      maskBase64 = maskImages[0].file ? await toBase64(maskImages[0].file) : await toBase64Url(maskImages[0].src);
+    }
+
     const startTime = new Date();
     try {
       let data;
       if (uploadedImages.length > 1) {
-        // 多张图片批量编辑，先转 Base64 数组
         console.log("使用批量编辑API，上传 " + uploadedImages.length + " 张照片");
         const base64Arr = await Promise.all(
           uploadedImages.map(img => img.file ? toBase64(img.file) : toBase64Url(img.src))
         );
-        data = await callBulkImageEditAPI({ images: base64Arr, prompt, model, size, n, quality });
+        data = await callBulkImageEditAPI({ images: base64Arr, maskBase64, prompt, model, size, n, quality });
       } else if (uploadedImages.length === 1) {
-        // 只有一张图片，使用编辑API
         console.log("使用单张图片编辑API");
         const sel = uploadedImages[0];
         const base64 = sel.file ? await toBase64(sel.file) : await toBase64Url(sel.src);
-        data = await callImageEditAPI({ imageBase64: base64, prompt, model, size, n, quality });
+        data = await callImageEditAPI({ imageBase64: base64, maskBase64, prompt, model, size, n, quality });
       } else {
-        // 无图片，使用生成API
         console.log("使用图片生成API");
         data = await callImageAPI({ prompt, model, size, n, quality });
       }
-      // 计算生成用时
       const endTime = new Date();
-      const timeTaken = (endTime - startTime) / 1000; // 转换为秒
+      const timeTaken = (endTime - startTime) / 1000;
       setGenerationTime(timeTaken);
       
-      // 从响应中提取图片 URL 或 Base64
       const arr = data.data.map(item => item.url || `data:image/png;base64,${item.b64_json}`);
       setUrls(arr);
       setUsageInfo(data.usage);
     } catch (err) {
-      // 如果后端返回了详细错误信息，则显示message和details
       console.error("API调用错误:", err);
       const msg = err.message || 'Error';
       const details = err.details ? JSON.stringify(err.details) : null;
@@ -291,15 +292,11 @@ function App() {
                 const files = Array.from(e.target.files);
                 if (!files.length) return;
                 
-                // 清除之前的生成结果，以便正确触发edit接口
                 setUrls([]);
                 
-                // 使用函数式更新来确保我们能访问到最新的状态
                 setUploadedImages(prev => {
                   const imgs = [...prev, ...files.map(file => ({ src: URL.createObjectURL(file), file }))].slice(0, 4);
                   
-                  // 在这个回调内部可以访问到更新后的uploadedImages（即imgs）
-                  // 在同一个批次中更新selectedImageIndex
                   setTimeout(() => {
                     setSelectedImageIndex(imgs.length - 1);
                     console.log("照片上传完成，设置selectedImageIndex为:", imgs.length - 1);
@@ -360,6 +357,36 @@ function App() {
               <Typography variant="body2">使用Tokens: {usageInfo.total_tokens} (输入 {usageInfo.input_tokens}, 输出 {usageInfo.output_tokens})</Typography>
             </Box>
           )}
+          <Box display="flex" alignItems="center" mb={2} mt={2}>
+            <Typography variant="h5" component="span" sx={{ mr: 1 }}>Mask Photo</Typography>
+            <Button variant="outlined" component="label" size="small">
+              Upload Mask
+              <input hidden accept="image/*" type="file" onChange={e => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setMaskImages([{ src: URL.createObjectURL(file), file }]);
+                setSelectedMaskIndex(0);
+              }} />
+            </Button>
+          </Box>
+          {maskImages.length > 0 && (
+            <Box mt={1} sx={{ width: '100%' }}>
+              <Box position="relative">
+                <img
+                  src={maskImages[0].src}
+                  alt="Mask"
+                  style={{ width: '100%', height: 'auto', objectFit: 'cover', border: selectedMaskIndex === 0 ? '2px solid green' : '2px solid transparent', borderRadius: 4, cursor: 'pointer' }}
+                  onClick={() => setSelectedMaskIndex(0)}
+                />
+                <Button
+                  size="small"
+                  variant="contained"
+                  onClick={() => { setMaskImages([]); setSelectedMaskIndex(null); }}
+                  sx={{ position: 'absolute', top: 0, right: 0, minWidth: 'auto', padding: '2px 4px' }}
+                >X</Button>
+              </Box>
+            </Box>
+          )}
         </Box>
         <Box sx={{ width: '70%', pl: 2 }}>
           <Typography variant="h5" gutterBottom>Generated Images</Typography>
@@ -401,6 +428,14 @@ function App() {
                   >
                     Down
                   </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => {
+                      setMaskImages([{ src: url, file: null }]);
+                      setSelectedMaskIndex(0);
+                    }}
+                  >Mask</Button>
                 </Box>
               </Box>
             ))

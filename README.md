@@ -1,7 +1,9 @@
 # GPT-Image-1 Demo
 
 这是一个使用 Azure OpenAI Image API 的交互式图像生成与编辑示例项目。
-
+- 参考
+    - https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/dall-e?tabs=gpt-image-1
+    - [Azure OpenAI Image API 文档](https://learn.microsoft.com/en-us/azure/ai-services/openai/reference-preview)
 ![示例](res/image.png)
 
 ## 特性
